@@ -13,9 +13,9 @@ fn main() {
     let mut database = Database::new().expect("Database initialization crashed.");
     database.insert_key_value(key.clone(), value.clone());
     database.insert_key_value(key.to_uppercase(), value);
-    match database.flush_map() {
+    match database.flush() {
         Ok(()) => println!("FLush kvs to kv.db"),
-        Err(e) => println!("Failed to flush, error: {:?}", e),
+        Err(err) => println!("Failed to flush, error: {:?}", err),
     };
     //can't do this, because database is moved to flush_map
     //database.insert_key_value(String::from("OK"), String::from("BITCH"));
@@ -23,31 +23,39 @@ fn main() {
 
 struct Database {
     map: HashMap<String, String>,
+    flush: bool,
 }
 
 impl Database {
     fn new() -> Result<Database, std::io::Error> {
         let mut map = HashMap::new();
-        let contents = match std::fs::read_to_string("kv.db") {
-            Ok(c) => c,
-            Err(err) => return Err(err),
-        };
-        //let contents = std::fs::read_to_string("kv.db")?;
-        for line in contents.lines() {
-            let (key, value) = line.split_once('\t').expect("Corrupt database");
-            map.insert(key.to_owned(), value.to_owned());
+        match std::fs::read_to_string("kv.db") {
+            Ok(contents) => {
+                for line in contents.lines() {
+                    let (key, value) = line.split_once('\t').expect("Corrupt database");
+                    map.insert(key.to_owned(), value.to_owned());
+                }
+                Ok(Database { map, flush: false })
+            }
+            Err(err) => Err(err),
         }
-        Ok(Database {
-            map,
-        })
+        //let contents = std::fs::read_to_string("kv.db")?;
     }
 
     fn insert_key_value(&mut self, key: String, value: String) {
         self.map.insert(key, value);
     }
 
-    fn flush_map(self) -> std::io::Result<()> {
-        let mut contents = String::new();
+    fn flush(&mut self) -> std::io::Result<()> {
+        println!("Do flush called");
+        match flush_map(&self) {
+            Ok(res) => {
+                self.flush = true;
+                Ok(res)
+            }
+            Err(err) => Err(err),
+        }
+        /* let mut contents = String::new();
         for (key, value) in &self.map {
             //let kv_pair = format!("{}\t{}\n", key, value);
             /*
@@ -59,6 +67,23 @@ impl Database {
             contents.push('\n'); */
             contents.push_str(format!("{}\t{}\n", key, value).as_str());
         }
-        std::fs::write("kv.db", contents)
+        std::fs::write("kv.db", contents) */
     }
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        if !self.flush {
+            let _ = flush_map(self);
+        }
+    }
+}
+
+fn flush_map(database: &Database) -> std::io::Result<()> {
+    println!("Do flush_map called");
+    let mut contents = String::new();
+    for (key, value) in &database.map {
+        contents.push_str(format!("{}\t{}\n", key, value).as_str());
+    }
+    std::fs::write("kv.db", contents)
 }
